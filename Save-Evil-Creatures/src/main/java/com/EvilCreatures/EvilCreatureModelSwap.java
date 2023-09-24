@@ -4,6 +4,7 @@ import com.google.inject.Provides;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
+import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.events.*;
 import net.runelite.client.callback.Hooks;
 import net.runelite.client.config.ConfigManager;
@@ -11,8 +12,6 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.plugins.PluginDescriptor;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -23,29 +22,29 @@ import java.util.List;
 
 public class EvilCreatureModelSwap extends Plugin
 {
-	@Inject
-	private Client client;
-	private static final int evilCreatureID=1241;
+
+	private static final int[] gnomeIDs = {6094, 6095, 6096, 6081, 6082, 6086, 6087};
+	private static final int evilCreatureHeadModelID=16957;
+	private static final int evilCreatureBodyModelID=16955;
 	private static final int evilCreatureStandingCode=4472;
 	private static final int evilCreatureMovingCode=4473;
 	private static final int gnomeMovingCode=189;
 	private static final int gnomeStandingCode=195;
-	private static final int evilCreatureModelID=16959;
-	private Model evilCreatureModel;
-	private ArrayList<modelPair> currentlyTrackedGnomes;
-	@Inject
-	private ClientThread clientThread;
+	private Model evilCreatureHeadModel;
+	private Model evilCreatureBodyModel;
+	private Animation evilCreatureStandingAnimation;
+	private Animation evilCreatureMovingAnimation;
+	private ArrayList<ModelPair> currentlyTrackedGnomes;
 	private boolean initialized;
-	private static final int[] gnomeIDs = {6094, 6095, 6096, 6081, 6082, 6086, 6087};
 	private final Hooks.RenderableDrawListener drawListener = this::shouldDraw;
 	@Inject
 	private Hooks hooks;
 	@Inject
 	private ExampleConfig config;
-	private Animation evilCreatureStandingAnimation;
-	private Animation evilCreatureMovingAnimation;
-	private long counter;
-	private int currentHeight;
+	@Inject
+	private ClientThread clientThread;
+	@Inject
+	private Client client;
 
 	/**
 	 * startUp Runs when the plugin starts
@@ -54,22 +53,19 @@ public class EvilCreatureModelSwap extends Plugin
 	@Override
 	protected void startUp() throws Exception
 	{
-		counter=0;
-		log.info("Example started!");
-		currentlyTrackedGnomes= new ArrayList<modelPair>();
+		currentlyTrackedGnomes= new ArrayList<ModelPair>();
 
 		hooks.registerRenderableDrawListener(drawListener);
 
-		final Instant loadTimeOutInstant = Instant.now().plus(Duration.ofSeconds(60));
-
-		//Attempts to load the evil Creature Model, if loaded then variable initalized is set to true
+		//Attempts to load the evil Creature Model, if loaded then variable initialized is set to true
 		initialized = false;
 		clientThread.invoke(() ->
 		{
-			evilCreatureModel=client.loadModel(evilCreatureModelID);
+			evilCreatureHeadModel=client.loadModel(evilCreatureHeadModelID);
+			evilCreatureBodyModel=client.loadModel(evilCreatureBodyModelID);
 			evilCreatureMovingAnimation=	client.loadAnimation(evilCreatureMovingCode);
 			evilCreatureStandingAnimation=	client.loadAnimation(evilCreatureStandingCode);
-			initialized = (evilCreatureModel != null);
+			initialized = ((evilCreatureHeadModel != null) && (evilCreatureBodyModel != null));
 		});
 	}
 
@@ -80,18 +76,29 @@ public class EvilCreatureModelSwap extends Plugin
 	@Override
 	protected void shutDown() throws Exception
 	{
-		log.info("Example stopped!");
+		//Makes the Gnomes come back
 		hooks.unregisterRenderableDrawListener(drawListener);
+
+		clientThread.invoke(() ->
+		{
+			//Removes all the creatures
+			for(ModelPair currentPair : currentlyTrackedGnomes)
+			{
+				currentPair.getHead().setActive(false);
+				currentPair.getBody().setActive(false);
+			}
+			currentlyTrackedGnomes.clear();
+		});
+		initialized=false;
 	}
 
 	/**
 	 * onGameStateChanged Runs when the game state changes
-	 * @param gameStateChanged
+	 * @param gameStateChanged [unused]
 	 */
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged gameStateChanged)
 	{
-
 		//Redoes the list due to issues with chunk loading, or something.  Covers a host of possible issues
 		if(initialized)
 		{
@@ -103,11 +110,6 @@ public class EvilCreatureModelSwap extends Plugin
 				}
 			}
 		}
-
-		if (gameStateChanged.getGameState() == GameState.LOGGED_IN)
-		{
-			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Example says " + config.greeting(), null);
-		}
 	}
 
 	@Provides
@@ -117,48 +119,61 @@ public class EvilCreatureModelSwap extends Plugin
 	}
 
 	/**
-	 * onClientTick Runs every client tick.  occurs far more ofthen then game ticks
+	 * onClientTick Runs every client tick.  occurs far more often then game ticks
 	 * @param tick
 	 */
 	@Subscribe
 	public void onClientTick(final ClientTick tick)
 	{
-		//Test is initalized.  If not, code is skipped
+		//Test is initialized.  If not, code is skipped
 		if(!initialized)
 		{
-			log.info("You never itlaized Error: 228955682");
 			return;
 		}
+
 		//Cycles through all gnomes turning them into evil creatures
-		for(modelPair currentPair : currentlyTrackedGnomes)
+		for(ModelPair currentPair : currentlyTrackedGnomes)
 		{
-			RuneLiteObject currentCreature=currentPair.getEvilCreature();
+			RuneLiteObject currentCreatureHead=currentPair.getHead();
+			RuneLiteObject currentCreatureBody=currentPair.getBody();
 			NPC currentGnome=currentPair.getNPC();
+			LocalPoint currentLocation = currentGnome.getLocalLocation();
+			int currentWorld= currentGnome.getWorldLocation().getPlane();
+			int currentOrientation= currentGnome.getOrientation();
 
 			//Set the runeliteobject to be the evil creature model, with proper orientation/location
-			currentCreature.setModel(evilCreatureModel);
-			currentCreature.setLocation(currentGnome.getLocalLocation(), currentGnome.getWorldLocation().getPlane());
-			currentCreature.setOrientation(currentGnome.getOrientation());
+			currentCreatureHead.setModel(evilCreatureHeadModel);
+			currentCreatureHead.setLocation(currentLocation, currentWorld);
+			currentCreatureHead.setOrientation(currentOrientation);
 			//makes runelite object visible
-			currentCreature.setActive(true);
+			currentCreatureHead.setActive(true);
 
-			//TODO animations are not smooth, they look disjointed
-			//Attempts to make the animation for the evil creatures.  But fails
+			currentCreatureBody.setModel(evilCreatureBodyModel);
+			currentCreatureBody.setLocation(currentLocation,currentWorld);
+			currentCreatureBody.setOrientation(currentOrientation);
+			//makes runelite object visible
+			currentCreatureBody.setActive(true);
+
+			//Sets the animation for the Body and the head based off if the Gnome is moving
+			//Note, we only test the creatures head because the head and body should always be the same
 			if (currentGnome.getPoseAnimation()==gnomeStandingCode&&
-					(currentCreature.getAnimation()!=evilCreatureStandingAnimation))
+					(currentCreatureHead.getAnimation()!=evilCreatureStandingAnimation))
 			{
-				currentCreature.setAnimation(evilCreatureStandingAnimation);
-				currentCreature.setShouldLoop(true);
+				currentCreatureHead.setAnimation(evilCreatureStandingAnimation);
+				currentCreatureHead.setShouldLoop(true);
+				currentCreatureBody.setAnimation(evilCreatureStandingAnimation);
+				currentCreatureBody.setShouldLoop(true);
 			}
 			else if (currentGnome.getPoseAnimation()==gnomeMovingCode&&
-					(currentCreature.getAnimation()!=evilCreatureMovingAnimation))
+					(currentCreatureHead.getAnimation()!=evilCreatureMovingAnimation))
 			{
-				currentCreature.setAnimation(evilCreatureMovingAnimation);
-				currentCreature.setShouldLoop(true);
+				currentCreatureHead.setAnimation(evilCreatureMovingAnimation);
+				currentCreatureHead.setShouldLoop(true);
+				currentCreatureBody.setAnimation(evilCreatureMovingAnimation);
+				currentCreatureBody.setShouldLoop(true);
 			}
 		}
 	}
-
 	/**
 	 * Runs everytime a NPC is spawned
 	 * @param inNPCSpawned the spawn NPC that was registered
@@ -171,12 +186,6 @@ public class EvilCreatureModelSwap extends Plugin
 		if(isNewGnome(newNPC))
 		{
 			addPair(newNPC);
-			//currentlyTrackedGnomes.add(new modelPair(newNPC, client.createRuneLiteObject()));
-		}
-		//For test purposes Only, should be deleted on live build
-		else if(!isGnome(newNPC))
-		{
-			log.info("ID " + newNPC.getId());
 		}
 	}
 
@@ -186,7 +195,8 @@ public class EvilCreatureModelSwap extends Plugin
 	 */
 	private void addPair(NPC inNPC)
 	{
-		currentlyTrackedGnomes.add(new modelPair(inNPC, client.createRuneLiteObject()));
+		currentlyTrackedGnomes.add(new ModelPair(inNPC,
+				client.createRuneLiteObject(), client.createRuneLiteObject()));
 	}
 
 	/**
@@ -199,17 +209,26 @@ public class EvilCreatureModelSwap extends Plugin
 		NPC goneNPC = inNPCDespawned.getNpc();
 		if(isOnList(goneNPC))
 		{
-			for (modelPair gnomeTest : currentlyTrackedGnomes)
+			for (ModelPair gnomeTest : currentlyTrackedGnomes)
 			{
-				if (gnomeTest.getNPC() == goneNPC) {
-
-					gnomeTest.getEvilCreature().setActive(false);
-					currentlyTrackedGnomes.remove(gnomeTest);
+				if (gnomeTest.getNPC() == goneNPC)
+				{
+					removeCreature(gnomeTest);
 					return;
 				}
 			}
-			log.info("Should never be excuted. Error: 482294");
 		}
+	}
+
+	/**
+	 * Removes the model pair from the list and makes the Creature disappear
+	 * @param inModelPair the model pair that is killed off
+	 */
+	private void removeCreature(ModelPair inModelPair)
+	{
+		inModelPair.getHead().setActive(false);
+		inModelPair.getBody().setActive(false);
+		currentlyTrackedGnomes.remove(inModelPair);
 	}
 
 	/**
@@ -230,7 +249,7 @@ public class EvilCreatureModelSwap extends Plugin
 	private boolean isOnList(NPC inNPC)
 	{
        //TODO never used this kind of loop before.. idk if i like it.
-        for (modelPair gnomeTest : currentlyTrackedGnomes) {
+        for (ModelPair gnomeTest : currentlyTrackedGnomes) {
             if (gnomeTest.getNPC() == inNPC) {
                 return true;
             }
@@ -245,24 +264,14 @@ public class EvilCreatureModelSwap extends Plugin
 	 */
 	private boolean isGnome(NPC inNPC)
 	{
-        for (int gnomeID : gnomeIDs) {
+		for (int gnomeID : gnomeIDs) {
             if (gnomeID == inNPC.getId())
 			{
                 return true;
             }
         }
+		//if you want everything to be evil creatures make this false
 		return false;
-	}
-
-	/**
-	 * Prints list of currently tracked gnomes.  For testing purposes.
-	 */
-	private void printList()
-	{
-		for (modelPair gnomeTest : currentlyTrackedGnomes)
-		{
-			log.info(gnomeTest.getNPC().getName());
-		}
 	}
 
 	/**
@@ -281,7 +290,3 @@ public class EvilCreatureModelSwap extends Plugin
 		return true;
 	}
 }
-
-
-
-
