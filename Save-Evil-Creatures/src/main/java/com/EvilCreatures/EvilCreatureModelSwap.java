@@ -255,7 +255,7 @@ public class EvilCreatureModelSwap extends Plugin
 	}
 
 	/**
-	 * Prints lsit of currently tracked gnomes.  For testing purposes only
+	 * Prints list of currently tracked gnomes.  For testing purposes.
 	 */
 	private void printList()
 	{
@@ -265,7 +265,12 @@ public class EvilCreatureModelSwap extends Plugin
 		}
 	}
 
-	//Thing I really don't understand well enough to properly document...
+	/**
+	 * tests if renderable is a Gnome NPC to prevent it from being drawn
+	 * @param inRenderable the rednerable object in question
+	 * @param isUIElement [unused]
+	 * @return returns false if renderable is a NPC gnome, true otherwise
+	 */
 	public boolean shouldDraw(Renderable inRenderable, boolean isUIElement)
 	{
 		if(inRenderable instanceof NPC)
