@@ -40,8 +40,6 @@ public class EvilCreatureModelSwap extends Plugin
 	@Inject
 	private Hooks hooks;
 	@Inject
-	private ExampleConfig config;
-	@Inject
 	private ClientThread clientThread;
 	@Inject
 	private Client client;
@@ -112,11 +110,6 @@ public class EvilCreatureModelSwap extends Plugin
 		}
 	}
 
-	@Provides
-	ExampleConfig provideConfig(ConfigManager configManager)
-	{
-		return configManager.getConfig(ExampleConfig.class);
-	}
 
 	/**
 	 * onClientTick Runs every client tick.  occurs far more often then game ticks
